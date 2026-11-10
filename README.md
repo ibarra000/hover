@@ -28,8 +28,10 @@ In the card:
    ollama pull qwen3:4b-instruct-2507-q4_K_M
    ollama pull qwen3-vl:4b-instruct
    ```
-2. Download `hover-x.y.z-win64.msi` from [Releases](../../releases) and run it. Python isn't needed. The MSI isn't
-   code-signed, so SmartScreen may warn you; choose **More info → Run anyway**.
+2. Download `hover-x.y.z-win64.msi` (about 6 MB) from [Releases](../../releases) and run it. Hover needs the
+   [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0); if it's missing, Windows offers the
+   download the first time Hover starts. The MSI isn't code-signed, so SmartScreen may warn you; choose
+   **More info → Run anyway**.
 3. Launch **Hover** from the desktop and look for the blank-page tray icon. To start it at login, use tray →
    **Start with Windows**.
 
@@ -78,24 +80,36 @@ Every looked-up term (80 characters or fewer) is saved to `%APPDATA%\Hover\gloss
 ## Privacy
 
 - Screenshots, OCR and both models stay on your PC.
-- In Define and Explain, the **first 200 characters** of text you look up go to public search engines (through
-  [`ddgs`](https://pypi.org/project/ddgs/)). The badge says `web` whenever that happened. Turn on **Strict offline** to
-  stop it entirely.
+- In Define and Explain, the **first 200 characters** of text you look up go to DuckDuckGo (and to Wikipedia's
+  search when DuckDuckGo has nothing). The badge says `web` whenever that happened. Turn on **Strict offline** to stop
+  it entirely.
 - Selection capture reads text through Windows UI Automation. In apps that don't support it, Hover copies briefly and
   then restores your previous clipboard, images and formatting included. Text Hover puts on the clipboard is marked so
   it stays out of Win+V history and cloud clipboard.
 - Hover only reads anything when you press a hotkey.
 
-## Run from source / test / release
+## Build, test, release
+
+Hover is C# (.NET 10, WPF). With the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0):
 
 ```powershell
-uv sync
-uvw run launch.pyw                                    # no console window
-uv run pytest --cov=hover                             # 63 tests
+dotnet run --project src/Hover                       # run from source
+dotnet test --filter "Category!=Live"                # unit tests
+dotnet test --filter "Category=Live"                 # against the real web, Ollama and screen
+dotnet publish src/Hover -c Release -o publish; dotnet build installer -c Release   # the MSI, in installer/bin
 ```
 
-To release: bump `version` in `pyproject.toml`, then `git tag vX.Y.Z && git push origin vX.Y.Z`. GitHub Actions tests,
-builds the MSI with cx_Freeze, and publishes it.
+| File | What it does |
+|---|---|
+| `App.xaml.cs` | Tray menu, hotkeys, and the capture → answer → card flow |
+| `Card.xaml(.cs)` | The card: layout in XAML; streaming, buttons, keys, pin and placement in code |
+| `Capture.cs`, `WinClipboard.cs` | Selection via UI Automation, clipboard-safe copy and paste, text under the cursor |
+| `SnipOverlay.cs`, `Ocr.cs`, `Images.cs` | Region snip, Windows OCR, screen grabs and PNGs |
+| `Llm.cs`, `Search.cs` | The running conversation, Ollama/OpenAI streaming, web search |
+| `Settings.cs`, `Glossary.cs`, `Hotkeys.cs` | settings.json, the glossary database, hotkey parsing |
+
+To release: `git tag vX.Y.Z && git push origin vX.Y.Z`. GitHub Actions tests, builds the MSI with WiX, and publishes
+it. The version comes from the tag.
 
 ## Credits
 
@@ -104,6 +118,7 @@ Ideas and techniques come from studying these open-source projects. Code is only
 - [PowerToys](https://github.com/microsoft/PowerToys) (MIT): releasing held modifiers before synthetic keys, the paste-back approach, and Windows OCR language selection
 - [selection-hook](https://github.com/0xfullex/selection-hook) (MIT): UI Automation → Ctrl+Insert → Ctrl+C selection capture with clipboard-sequence detection and restore
 - [Text-Grab](https://github.com/TheJoeFin/Text-Grab) (MIT): the frozen-screen snip overlay
+- [Wikipedia's REST API](https://www.mediawiki.org/wiki/API:REST_API): the search fallback
 - [ClipboardConqueror](https://github.com/aseichter2007/ClipboardConqueror) (MIT): inline mode prefixes in copied text
 - Design references only (GPL, no code used): [WritingTools](https://github.com/theJayTea/WritingTools), [pot](https://github.com/pot-app/pot-desktop), [Easydict](https://github.com/tisfeng/Easydict)
 

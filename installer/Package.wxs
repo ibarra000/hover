@@ -1,0 +1,32 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <!-- Same UpgradeCode as the Python versions, so this installs over them. -->
+  <Package Name="Hover" Manufacturer="Hover" Version="$(Version)" Scope="perUser"
+           UpgradeCode="3D78F94B-9441-4277-BFA8-EFFA6CC7E6DC">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Hover is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="hover.ico" SourceFile="..\hover.ico" />
+    <Property Id="ARPPRODUCTICON" Value="hover.ico" />
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsFolder" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="Hover" />
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="Hover">
+      <Files Directory="INSTALLFOLDER" Include="..\publish\**" />
+      <Component Directory="DesktopFolder">
+        <Shortcut Name="Hover" Target="[INSTALLFOLDER]Hover.exe" WorkingDirectory="INSTALLFOLDER" Icon="hover.ico" />
+        <RegistryValue Root="HKCU" Key="Software\Hover" Name="DesktopShortcut" Value="1" KeyPath="yes" />
+      </Component>
+    </Feature>
+
+    <!-- Start Hover when the install finishes. -->
+    <CustomAction Id="LaunchHover" Directory="INSTALLFOLDER" ExeCommand="&quot;[INSTALLFOLDER]Hover.exe&quot;"
+                  Return="asyncNoWait" Impersonate="yes" />
+    <InstallExecuteSequence>
+      <Custom Action="LaunchHover" After="InstallFinalize" Condition="NOT REMOVE" />
+    </InstallExecuteSequence>
+  </Package>
+</Wix>

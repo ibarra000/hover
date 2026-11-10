@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Hover/Hover.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Hover.Tests/Hover.Tests.csproj" />
+  </Folder>
+</Solution>

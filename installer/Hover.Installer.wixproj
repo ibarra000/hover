@@ -1,0 +1,11 @@
+<Project Sdk="WixToolset.Sdk/6.0.2">
+  <!-- Builds bin\hover-<version>-win64.msi from the "publish" folder (run dotnet publish first). -->
+  <PropertyGroup>
+    <Version Condition="'$(Version)' == ''">2.0.0</Version>
+    <OutputName>hover-$(Version)-win64</OutputName>
+    <Platform>x64</Platform>
+    <DefineConstants>Version=$(Version)</DefineConstants>
+    <!-- Per-user install into %LOCALAPPDATA%\Programs: these checks only apply to per-machine packages. -->
+    <SuppressIces>ICE38;ICE60;ICE64;ICE91</SuppressIces>
+  </PropertyGroup>
+</Project>

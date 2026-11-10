@@ -11,11 +11,18 @@ jobs:
   msi:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-      - run: uv sync --locked
-      - run: uv run pytest -q
-      - run: uv run cxfreeze bdist_msi
-      - run: gh release create "${{ github.ref_name }}" (Get-ChildItem dist/*.msi) --generate-notes
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+      - name: Test (the live tests need Ollama and a desktop, so they're skipped here)
+        run: dotnet test tests/Hover.Tests --filter "Category!=Live"
+      - name: Build the MSI
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          dotnet publish src/Hover -c Release -o publish -p:Version=$version
+          dotnet build installer -c Release -p:Version=$version
+      - run: gh release create "${{ github.ref_name }}" (Get-ChildItem installer/bin/x64/Release/*.msi) --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}

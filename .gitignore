@@ -1,7 +1,7 @@
-.venv/
-build/
+bin/
+obj/
+publish/
+*.user
+.vs/
 dist/
-__pycache__/
-.pytest_cache/
-.coverage
-*.egg-info/
+TestResults/
