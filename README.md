@@ -36,18 +36,32 @@ uvw run hover.pyw    # no console window
 Bump `version` in `pyproject.toml`, then `git tag vX.Y.Z && git push origin vX.Y.Z`.
 GitHub Actions runs the tests, builds the MSI with cx_Freeze (`uv run cxfreeze bdist_msi`), and publishes the release.
 
-## Configure
+## Modes & settings
 
-Edit the constants at the top of `hover.pyw`:
+Pick a mode from the tray menu:
+- **Define**: the 1–3 line definition, grounded in a web search.
+- **Compress**: merges everything copied in the current context into one dense paragraph. It never searches the web.
+  Switching modes keeps the context, so press the hotkey again on the same clipboard to compress what you've collected.
 
-- `HOTKEY`: pynput syntax, e.g. `"<ctrl>+<shift>+<space>"`.
-- `MODEL`: any Ollama model works. Hover always sends `think=False`, so thinking-capable models answer directly.
-  Run `ollama pull <model>` first. Alternatives:
-  - `hf.co/LiquidAI/LFM2.5-1.2B-Instruct-GGUF:Q8_0`: about 3× faster and half the size, but less accurate (1.2 GB).
-  - `qwen3.5:0.8b`: smallest, and the least accurate in testing (~1 GB).
+Tray → **Settings** opens `%APPDATA%\Hover\settings.json` in your editor. Changes apply on the next hotkey press;
+only `hotkey` needs a restart (Quit, then relaunch).
 
-- `VISION_MODEL`: any Ollama vision model, e.g. `qwen3-vl:2b-instruct` (lighter, weaker at small text).
+| Key | Default | What it does |
+|---|---|---|
+| `hotkey` | `<ctrl>+<alt>+h` | pynput syntax, e.g. `<ctrl>+<shift>+<space>` |
+| `mode` | `define` | which of `prompts` to use (the tray sets this) |
+| `model` / `vision_model` | `qwen3:4b-instruct-2507-q4_K_M` / `qwen3-vl:4b-instruct` | any Ollama models (run `ollama pull` first) |
+| `temperature`, `max_tokens` | `0.3`, `160` | creativity and answer length |
+| `search_results` | `3` | web snippets per define lookup |
+| `max_chars` | `2000` | how much copied text is used (only the first 200 characters are ever searched) |
+| `context_messages` | `12` | how much running context is kept (2 per item) |
+| `hide_after_seconds` | `20` | when the card hides itself |
+| `prompts` | `define`, `compress` | the system prompt for each mode. **Add a key to add a mode** (restart to see it in the tray) |
 
+Delete a key to restore its default. Delete the file to reset everything.
+
+Other models that work: `hf.co/LiquidAI/LFM2.5-1.2B-Instruct-GGUF:Q8_0` (about 3× faster, less accurate) and
+`qwen3-vl:2b-instruct` (a lighter vision model). Hover always sends `think=False`, so thinking-capable models answer directly.
 Both models stay loaded in memory (`keep_alive=-1`). Check them with `ollama ps`.
 
 ## Privacy

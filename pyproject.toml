@@ -1,6 +1,6 @@
 [project]
 name = "hover"
-version = "0.2.0"
+version = "0.3.0"
 description = "Hotkey dictionary and documentation lookup for Windows, powered by a local model."
 requires-python = ">=3.13"
 dependencies = [
