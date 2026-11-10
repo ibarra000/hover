@@ -1,0 +1,34 @@
+[project]
+name = "hover"
+version = "0.1.0"
+description = "Hotkey dictionary and documentation lookup for Windows, powered by a local model."
+requires-python = ">=3.13"
+dependencies = [
+    "ddgs>=9.16.1",
+    "ollama>=0.6.3",
+    "pillow>=13.0.0",
+    "pynput>=1.8.2",
+    "pystray>=0.19.5",
+]
+
+[dependency-groups]
+dev = [
+    "cx-freeze>=8.7.4",
+    "pytest>=9.2.0",
+    "pytest-cov>=7.1.0",
+]
+
+[tool.cxfreeze]
+executables = [
+    { script = "hover.pyw", base = "gui", icon = "hover", target_name = "Hover", shortcut_name = "Hover", shortcut_dir = "DesktopFolder" },
+]
+
+[tool.cxfreeze.build_exe]
+packages = ["pystray", "pynput", "ddgs"]  # backends/engines are picked via dynamic imports
+
+[tool.cxfreeze.bdist_msi]
+upgrade-code = "{3D78F94B-9441-4277-BFA8-EFFA6CC7E6DC}"  # fixed, so new versions upgrade in place
+initial-target-dir = "[LocalAppDataFolder]Programs\\Hover"
+install-icon = "hover.ico"
+launch-on-finish = true
+summary-data = { author = "Edward Ibarra" }
