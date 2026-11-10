@@ -83,13 +83,6 @@ def test_compress_sees_the_conversation_as_one_transcript(chats):
     assert messages[1]["content"].endswith(llm.WHOLE_CONVERSATION)
 
 
-def test_settings_edits_invalidate_the_cache(chats):
-    session = Session()
-    session.ask("bonjour", DEFAULTS, mode="translate")
-    session.ask("bonjour", {**DEFAULTS, "language": "German"}, mode="translate")
-    assert len(chats) == 2
-
-
 def test_clearing_during_a_stream_discards_that_answer(monkeypatch):
     session = Session()
 
@@ -137,14 +130,18 @@ def test_per_mode_model_and_language_placeholder(chats):
     assert "German" in chats[0]["messages"][0]["content"] and "{language}" not in chats[0]["messages"][0]["content"]
 
 
-def test_repeating_an_item_replays_the_answer_unless_the_mode_changed(chats):
-    session, tokens = Session(), []
-    session.ask("os.path.join", DEFAULTS)
+def test_asking_the_same_item_again_replaces_its_turn(chats):
+    session = Session()
+    session.ask("mutex", DEFAULTS)
+    session.ask("mutex", COMPRESS)  # e.g. Shift+Tab to the next mode
+    assert session.turns == 1
+    assert [m["content"] for m in chats[1]["messages"]][1:] != []  # asked again, not replayed
+    assert "Conversation so far" not in chats[1]["messages"][-1]["content"]  # its old turn isn't context for itself
 
-    assert session.ask("os.path.join", DEFAULTS, on_token=tokens.append).text == ANSWER
-    assert (len(chats), tokens) == (1, [ANSWER])
-    session.ask("os.path.join", COMPRESS)
-    assert len(chats) == 2
+    session.ask("deadlock", DEFAULTS)
+    session.ask(Shot(b"a"), DEFAULTS)
+    session.ask(Shot(b"b"), DEFAULTS)  # different screenshots are different items, even with no OCR text
+    assert session.turns == 4
 
 
 def test_cancel_stops_streaming_and_keeps_nothing(chats):

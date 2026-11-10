@@ -13,9 +13,11 @@ personal glossary you can export to Anki.
 
 In the card:
 - Answers **stream** in as they're generated.
-- Type a **follow-up** in the box and press Enter.
-- **Copy** (Ctrl+C), **Replace** the original selection (Ctrl+R), **Speak** (Ctrl+T), or **Pin** it open (Ctrl+P).
-- Esc or clicking elsewhere hides it.
+- **Shift+Tab** switches to the next mode and answers the same item again.
+- Type a **follow-up** in the box and press Enter, or click the **mic** (Ctrl+M) to say it with Windows voice typing.
+- **Copy** (Ctrl+C), **Replace** the original selection (Ctrl+R), or **Pin** it (Ctrl+P). Pinned, the card becomes a
+  normal window: drag it to a screen edge or use Snap Layouts to arrange it beside your work, and resize it.
+- Drag the card by its title or any empty area. Esc or clicking elsewhere hides it.
 - The footer shows a **privacy badge**: `local` means nothing left your PC, `web · site ↗` means a search was used (click it to open the source).
 
 ## Install
@@ -33,7 +35,7 @@ In the card:
 
 ## Modes
 
-Pick the default mode from the tray. You can also give any mode its own hotkey, or put `>>mode:` at the start of copied
+Pick the default mode from the tray or with Shift+Tab in the card. You can also give any mode its own hotkey, or put `>>mode:` at the start of copied
 text (for example `>>translate: Guten Morgen`).
 
 | Mode | Does | Web search |
@@ -48,8 +50,8 @@ the hotkey with nothing selected and an empty clipboard (Win+V → Clear all), o
 
 ## Settings
 
-Tray → **Settings** opens `%APPDATA%\Hover\settings.json`. Changes apply on the next lookup; hotkeys, models and the
-API need a restart (Quit, then relaunch). If the file has a mistake, the card shows the error and Hover keeps running
+Tray → **Settings** opens `%APPDATA%\Hover\settings.json`. Changes apply on the next lookup; hotkeys and models need a
+restart (Quit, then relaunch). If the file has a mistake, the card shows the error and Hover keeps running
 on defaults with **web search off**.
 
 | Key | Default | What it does |
@@ -66,27 +68,12 @@ on defaults with **web search off**.
 | `copy_fallback` | `true` | when an app doesn't expose its selection, copy it briefly and restore your clipboard |
 | `glossary` | `true` | save looked-up terms |
 | `search_results`, `max_chars`, `context_messages`, `hide_after_seconds` | `3`, `2000`, `12`, `30` | |
-| `api_port` | `0` (off) | local API, see below |
 
 ## Glossary → Anki
 
 Every looked-up term (80 characters or fewer) is saved to `%APPDATA%\Hover\glossary.db`, and the footer shows
 "looked up 3×" when you keep coming back to one. Tray → **Export glossary to Anki** writes
 `Documents\Hover glossary.csv`, ready for Anki's File → Import.
-
-## Local API (off by default)
-
-Set `api_port` (e.g. `8765`) and restart. Then scripts, AutoHotkey, or a Stream Deck can trigger lookups. API calls use
-their own throwaway context and never see yours.
-
-```powershell
-$token = Get-Content "$env:APPDATA\Hover\api_token"
-Invoke-RestMethod -Method Post http://127.0.0.1:8765/ask -ContentType application/json `
-  -Headers @{ Authorization = "Bearer $token" } -Body '{"text": "idempotent", "mode": "define"}'
-```
-
-The API listens on 127.0.0.1 only. It requires the token, and it refuses browser requests (`Origin` header) and other
-`Host` names (DNS rebinding).
 
 ## Privacy
 

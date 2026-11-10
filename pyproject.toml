@@ -1,6 +1,6 @@
 [project]
 name = "hover"
-version = "1.0.0"
+version = "1.1.0"
 description = "Select, hover over, copy, or snip anything on Windows and get a short grounded answer from a local model."
 requires-python = ">=3.13"
 dependencies = [

@@ -14,20 +14,18 @@ from pathlib import Path
 
 import pystray
 import win32gui
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageTk
 from pynput import keyboard
 
-from hover import api, capture, ocr, settings, snip
+from hover import capture, ocr, settings, snip
 from hover.llm import Answer, Session, Shot, split_inline_mode, warm_up
 from hover.store import Glossary
 from hover.ui import Popup, footer_text
 
 GLOSSARY_FILE = settings.DATA_DIR / "glossary.db"
-API_TOKEN_FILE = settings.DATA_DIR / "api_token"
 EXPORT_FILE = Path.home() / "Documents" / "Hover glossary.csv"
 STARTUP_LINK = Path(os.environ.get("APPDATA", Path.home())) / "Microsoft/Windows/Start Menu/Programs/Startup/Hover.lnk"
 EMPTY = "Context cleared. Select text, copy something, or snip (Ctrl+Alt+S), then press the hotkey."
-TK_CALL_TIMEOUT = 5
 ACTION_POLL_MS = 30
 
 
@@ -38,10 +36,6 @@ def tray_image() -> Image.Image:
     draw.polygon([(12, 4), (40, 4), (52, 16), (52, 60), (12, 60)], fill="white", outline="gray", width=3)
     draw.line([(40, 4), (40, 16), (52, 16)], fill="gray", width=3)
     return image
-
-
-def title_for(item: str | Shot) -> str:
-    return item if isinstance(item, str) else "Screenshot"
 
 
 def launch_command() -> tuple[str, str]:
@@ -76,8 +70,12 @@ class App:
         self.root = root or tk.Tk()
         self.settings, self.startup_error = settings.safe_load()
         self.session, self.glossary = Session(), Glossary(GLOSSARY_FILE)
-        self.popup = Popup(self.root, on_follow_up=self.follow_up, on_replace=self.replace, on_hide=self.cancel_current)
+        self.popup = Popup(self.root, on_follow_up=self.follow_up, on_replace=self.replace, on_hide=self.cancel_current,
+                           on_cycle=self.cycle_mode)
+        self.icon = ImageTk.PhotoImage(tray_image())  # kept referenced: the pinned card's title bar and taskbar icon
+        self.root.iconphoto(True, self.icon)
         self.request, self.cancel, self.window = 0, threading.Event(), 0
+        self.item: tuple[str | bytes, str] | None = None  # the card's looked-up item and its mode (not follow-ups)
         self.actions: queue.SimpleQueue[Callable[[], None]] = queue.SimpleQueue()  # hotkey thread -> Tk thread
 
     # --- settings -------------------------------------------------------------------------------------------
@@ -145,13 +143,26 @@ class App:
     def cancel_current(self) -> None:
         self.cancel.set()
 
+    def cycle_mode(self) -> None:
+        """Shift+Tab in the card: make the next mode the default and answer the current item again in it."""
+        if not (current := self.fresh_settings()):
+            return
+        item, shown = self.item or ("", current["mode"])
+        names = list(current["modes"])
+        mode = names[(names.index(shown) + 1) % len(names)] if shown in names else names[0]
+        settings.update(mode=mode)
+        if not item:
+            self.popup.notice("Hover", f"Mode: {mode}")
+            return
+        self.ask(item, mode, {**current, "mode": mode}, keep_position=True)
+
     # --- the lookup flow ----------------------------------------------------------------------------------
-    def begin(self, title: str, current: dict, keep_position: bool) -> tuple[int, threading.Event]:
+    def begin(self, title: str, mode: str, current: dict, keep_position: bool) -> tuple[int, threading.Event]:
         """Show the card for a new lookup and cancel whatever was still streaming (Tk thread)."""
         self.cancel.set()
         self.cancel, self.request = threading.Event(), self.request + 1
         self.popup.hide_ms = current["hide_after_seconds"] * 1000
-        self.popup.show(title, self.request, keep_position)
+        self.popup.show(title, self.request, keep_position, status=f"{mode} · Shift+Tab: next mode")
         return self.request, self.cancel
 
     def ask(self, item: str | bytes, mode: str | None, current: dict, keep_position: bool = False,
@@ -159,14 +170,17 @@ class App:
         if not item:
             self.cancel.set()
             self.session.clear()  # quick: the session lock is never held while streaming
+            self.item = None
             self.popup.notice("Hover", EMPTY)
             return
-        if isinstance(item, bytes):
-            item = Shot(item)
-        else:
+        if isinstance(item, str):
             inline, item = split_inline_mode(item, current["modes"])
             mode = inline or mode
-        request, cancel = self.begin(title_for(item), current, keep_position)
+        mode = mode or current["mode"]
+        if save:  # a lookup, not a follow-up question: this is what Shift+Tab re-answers
+            self.item = (item, mode)  # without any ">>mode:" prefix, so Shift+Tab can change the mode
+        item, title = (Shot(item), "Screenshot") if isinstance(item, bytes) else (item, item)
+        request, cancel = self.begin(title, mode, current, keep_position)
         in_background(partial(self.answer, item, mode, current, request, cancel, save=save))
 
     def remember(self, item: str | Shot, result: Answer, current: dict, save: bool) -> int:
@@ -179,49 +193,20 @@ class App:
             return 0
 
     def answer(self, item: str | Shot, mode: str | None, current: dict, request: int,
-               cancel: threading.Event, session: Session | None = None, save: bool = True) -> Answer | None:
+               cancel: threading.Event, save: bool = True) -> None:
         """Worker: OCR screenshots, stream the answer into the card, record it in the glossary."""
-        session = session or self.session
         try:
             if isinstance(item, Shot) and not item.text:
                 item = Shot(item.png, ocr.read_text(item.png))
-            result = session.ask(item, current, mode, cancel=cancel,
-                                 on_token=lambda chunk: self.root.after(0, self.popup.append, request, chunk))
+            result = self.session.ask(item, current, mode, cancel=cancel,
+                                      on_token=lambda chunk: self.root.after(0, self.popup.append, request, chunk))
             if result.cancelled:
-                return None
+                return
             count = self.remember(item, result, current, save)
-            footer = footer_text(result.link, result.mode, session.turns, count)
+            footer = footer_text(result.link, result.mode, self.session.turns, count)
             self.root.after(0, self.popup.finish, request, result.text, footer, result.link)
-            return result
         except Exception as error:  # Ollama down, model missing, bad mode name, ...: show it, don't swallow it
             self.root.after(0, self.popup.finish, request, f"Error: {error}", "error", "")
-            return Answer(f"Error: {error}", "", mode or "", cancelled=False)
-
-    def on_tk(self, function: Callable[..., object], *args: object) -> object:
-        """Run function on the Tk thread and wait for its result (for the HTTP API thread)."""
-        done, gave_up, box = threading.Event(), threading.Event(), []
-
-        def run() -> None:
-            if not gave_up.is_set():  # don't open a card nobody will fill once the caller has timed out
-                box.append(function(*args))
-            done.set()
-
-        self.root.after(0, run)
-        if not done.wait(TK_CALL_TIMEOUT):
-            gave_up.set()
-        return box[0] if box else None
-
-    def api_ask(self, text: str, mode: str | None) -> dict:
-        current, error = settings.safe_load()
-        if error:
-            return {"error": error}
-        inline, text = split_inline_mode(text, current["modes"])
-        started = self.on_tk(self.begin, text, current, False)
-        if not started:
-            return {"error": "the UI is busy"}
-        # A throwaway session: API callers must never see (or pollute) the user's running context.
-        result = self.answer(text, inline or mode, current, *started, session=Session(), save=False)
-        return {"answer": result.text, "source": result.link, "mode": result.mode} if result else {"error": "cancelled"}
 
     # --- tray -------------------------------------------------------------------------------------------
     def export_glossary(self) -> None:
@@ -292,11 +277,6 @@ class App:
                 self.root.after(0, self.popup.notice, "Hover", error)
 
         self.root.after(0, in_background, load_models)
-        if port := self.settings["api_port"]:
-            try:
-                api.serve(port, api.load_token(API_TOKEN_FILE), self.api_ask)
-            except OSError as error:
-                self.root.after(0, self.popup.notice, "Hover", f"API port {port} unavailable: {error}")
         self.root.mainloop()
 
 

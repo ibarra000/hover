@@ -173,11 +173,6 @@ def clipboard_changed(before: int, wait: float = COPY_WAIT) -> bool:
     return False
 
 
-def clipboard_has_any(formats: set[int]) -> bool:
-    with open_clipboard():
-        return any(win32clipboard.IsClipboardFormatAvailable(fmt) for fmt in formats)
-
-
 def copy_selection(allow_ctrl_c: bool) -> str:
     """Copy the selection with synthetic keys, read it, then put the user's clipboard back exactly as it was.
 
@@ -187,8 +182,9 @@ def copy_selection(allow_ctrl_c: bool) -> str:
     if not clipboard_operation.acquire(blocking=False):
         return ""
     try:
-        if clipboard_has_any(UNRESTORABLE):
-            return ""
+        with open_clipboard():
+            if any(win32clipboard.IsClipboardFormatAvailable(fmt) for fmt in UNRESTORABLE):
+                return ""
         wait_for_modifiers_released()
         backup = backup_clipboard()
         before = win32clipboard.GetClipboardSequenceNumber()

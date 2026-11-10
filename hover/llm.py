@@ -70,17 +70,13 @@ def split_inline_mode(text: str, modes: dict) -> tuple[str | None, str]:
 
 def openai_messages(messages: list[dict]) -> list[dict]:
     """Ollama-style messages (with optional "images" bytes) -> OpenAI chat format."""
-    converted = []
-    for message in messages:
+    def content(message: dict) -> str | list[dict]:
         images = message.get("images") or []
-        if not images:
-            converted.append({"role": message["role"], "content": message["content"]})
-            continue
-        parts = [{"type": "text", "text": message["content"]}]
-        parts += [{"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64.b64encode(png).decode()}"}}
-                  for png in images]
-        converted.append({"role": message["role"], "content": parts})
-    return converted
+        return [{"type": "text", "text": message["content"]}, *(
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64.b64encode(png).decode()}"}}
+            for png in images)] if images else message["content"]
+
+    return [{"role": message["role"], "content": content(message)} for message in messages]
 
 
 def stream_chat(settings: dict, model: str, messages: list[dict]) -> Iterator[str]:
@@ -124,13 +120,6 @@ def warm_up(settings: dict) -> str:
         return f"Model not ready: {error}"
 
 
-def cache_key(item: str | Shot, settings: dict, mode: str) -> tuple:
-    """Same item + same answer-affecting settings = same answer, so edits to settings.json still take effect."""
-    relevant = (settings["model"], settings["vision_model"], settings["language"], settings["offline"],
-                settings["provider"], repr(settings["modes"].get(mode)))
-    return mode, item, relevant
-
-
 def trimmed(history: list[dict[str, str]], keep: int) -> list[dict[str, str]]:
     """The newest `keep` messages, in whole user/assistant pairs (0 keeps nothing)."""
     keep = max(0, keep) - max(0, keep) % 2
@@ -148,15 +137,19 @@ class Session:
         self._lock = threading.Lock()
         self._generation = 0  # bumped by clear(), so a stream that started before a clear doesn't commit
         self.history: list[dict[str, str]] = []  # text only: no snippets or image bytes are kept
-        self._last: tuple[tuple, Answer] | None = None
+        self._last_item: str | Shot | None = None  # the item the newest turn is about
 
     def clear(self) -> None:
         with self._lock:
-            self.history, self._last, self._generation = [], None, self._generation + 1
+            self.history, self._last_item, self._generation = [], None, self._generation + 1
 
     @property
     def turns(self) -> int:
         return len(self.history) // 2
+
+    def _replaceable(self, item: str | Shot) -> list[dict[str, str]]:
+        """The history minus its newest turn if that turn was about this same item (call with the lock held)."""
+        return self.history[:-2] if item == self._last_item and len(self.history) >= 2 else list(self.history)
 
     def _prompt(self, item: str | Shot, settings: dict, mode: str) -> tuple[str, str, dict, list[dict]]:
         """(model, history note, current message, search results) for this item."""
@@ -178,24 +171,19 @@ class Session:
 
     def ask(self, item: str | Shot, settings: dict, mode: str | None = None,
             on_token: Callable[[str], None] = lambda _: None, cancel: threading.Event | None = None) -> Answer:
-        """Answer with a mode's prompt, streaming chunks to on_token. A set `cancel` stops early (nothing is kept)."""
-        if isinstance(item, str):
-            inline, item = split_inline_mode(item, settings["modes"])
-            mode = inline or mode
+        """Answer with a mode's prompt, streaming chunks to on_token. A set `cancel` stops early (nothing is kept).
+
+        Asking about the same item again (a repeat press, or Shift+Tab to another mode) replaces its earlier turn.
+        """
         mode = mode or settings["mode"]
-        key = cache_key(item, settings, mode)
-        with self._lock:
-            cached = self._last[1] if self._last and self._last[0] == key else None
-            history, generation = list(self.history), self._generation
-        if cached:
-            on_token(cached.text)
-            return cached  # same item again: don't add a duplicate turn
         stopped = Answer("", "", mode, cancelled=True)
         if cancel and cancel.is_set():
             return stopped  # superseded before it even started: skip the search and the model call
         model, note, current, results = self._prompt(item, settings, mode)
         if cancel and cancel.is_set():
             return stopped
+        with self._lock:
+            history, generation = self._replaceable(item), self._generation
         system = {"role": "system", "content": settings["modes"][mode]["prompt"].replace("{language}", settings["language"])}
         if mode == "define" or not history:
             messages = [system, *history, current]
@@ -212,6 +200,6 @@ class Session:
         with self._lock:
             if generation == self._generation:  # the context wasn't cleared while we were streaming
                 turn = [{"role": "user", "content": note}, {"role": "assistant", "content": answer.text}]
-                self.history = trimmed([*self.history, *turn], settings["context_messages"])
-                self._last = (key, answer)
+                self.history = trimmed([*self._replaceable(item), *turn], settings["context_messages"])
+                self._last_item = item
         return answer

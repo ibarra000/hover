@@ -23,10 +23,8 @@ def hover_app(monkeypatch, tmp_path, root):
     instance.glossary.close()
 
 
-def test_tray_image_and_titles():
+def test_tray_image():
     assert app.tray_image().size == (64, 64)
-    assert app.title_for("mutex") == "mutex"
-    assert app.title_for(Shot(b"png")) == "Screenshot"
 
 
 def test_launch_command_runs_the_launcher_with_pythonw():
@@ -49,7 +47,7 @@ def test_a_lookup_streams_into_the_card_and_lands_in_the_glossary(hover_app):
     assert pump(hover_app.root, lambda: hover_app.popup.status["text"].startswith("local"))
     assert hover_app.popup.answer == "adjective: short-lived"
     hover_app.ask("ephemeral", "translate", current)
-    assert pump(hover_app.root, lambda: "translate" in hover_app.popup.status["text"])
+    assert pump(hover_app.root, lambda: hover_app.popup.status["text"].startswith("local · translate"))
     assert hover_app.glossary.rows()[0][:2] == ("ephemeral", "translate")
 
 
@@ -64,11 +62,11 @@ def test_screenshots_are_ocrd_and_inline_modes_apply(hover_app, monkeypatch):
     monkeypatch.setattr(hover_app.session, "ask", spy)
     current = settings.load()
     hover_app.ask(b"\x89PNG", None, current)
-    assert pump(hover_app.root, lambda: bool(seen) and hover_app.popup.status["text"])
+    assert pump(hover_app.root, lambda: hover_app.popup.status["text"].startswith("local"))
     hover_app.ask(">>compress: a long article", None, current)
-    assert pump(hover_app.root, lambda: len(seen) == 2 and "compress" in hover_app.popup.status["text"])
+    assert pump(hover_app.root, lambda: hover_app.popup.status["text"].startswith("local · compress"))
 
-    assert seen[0] == (Shot(b"\x89PNG", "OCR text from the screenshot"), None)
+    assert seen[0] == (Shot(b"\x89PNG", "OCR text from the screenshot"), "define")
     assert seen[1] == ("a long article", "compress")
 
 
@@ -87,12 +85,24 @@ def test_errors_are_shown_in_the_card(hover_app, monkeypatch):
     assert pump(hover_app.root, lambda: hover_app.popup.answer.startswith("Error: Failed to connect"))
 
 
-def test_api_requests_run_through_the_same_flow(hover_app):
-    result = {}
-    worker = threading.Thread(target=lambda: result.update(hover_app.api_ask("mutex", None)))
-    worker.start()
-    assert pump(hover_app.root, lambda: not worker.is_alive())
-    assert result == {"answer": "adjective: short-lived", "source": "", "mode": "define"}
+def test_shift_tab_cycles_the_mode_and_reanswers_the_item(hover_app):
+    hover_app.ask(">>translate: bonjour", None, settings.load())
+    assert pump(hover_app.root, lambda: hover_app.popup.status["text"].startswith("local · translate"))
+
+    hover_app.cycle_mode()  # translate is last, so it wraps around to the first mode
+    assert hover_app.popup.status["text"].startswith("define · Shift+Tab")
+    assert pump(hover_app.root, lambda: hover_app.popup.status["text"].startswith("local · define"))
+    assert settings.load()["mode"] == "define" and hover_app.session.turns == 1
+    assert hover_app.popup.title["text"] == "bonjour"
+
+    hover_app.follow_up("is it formal?")
+    assert pump(hover_app.root, lambda: hover_app.popup.status["text"].startswith("local"))
+    assert hover_app.item == ("bonjour", "define")  # Shift+Tab after a follow-up still re-answers the lookup
+
+
+def test_shift_tab_without_an_item_just_switches_mode(hover_app):
+    hover_app.cycle_mode()
+    assert settings.load()["mode"] == "explain" and "Mode: explain" in hover_app.popup.answer
 
 
 def test_hotkey_map_includes_per_mode_hotkeys(hover_app):

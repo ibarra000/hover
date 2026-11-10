@@ -1,12 +1,9 @@
 import io
-import json
-import urllib.error
-import urllib.request
 
 import pytest
 from PIL import Image, ImageDraw, ImageFont
 
-from hover import api, ocr, snip
+from hover import ocr, snip
 from hover.store import Glossary
 from tests.conftest import pump
 
@@ -43,59 +40,6 @@ def test_glossary_export_neutralizes_spreadsheet_formulas(tmp_path):
     glossary.export_anki(out)
     assert out.read_text("utf-8").splitlines()[3].startswith("'=HYPERLINK(1),'+evil")
     glossary.close()
-
-
-# --- local API ---------------------------------------------------------------------------------------------
-TOKEN = "s3cret-token"
-
-
-@pytest.fixture
-def server():
-    calls = []
-    instance = api.serve(0, TOKEN, lambda text, mode: calls.append((text, mode)) or {"answer": f"echo {text}"})
-    yield f"http://127.0.0.1:{instance.server_address[1]}", calls
-    instance.shutdown()
-
-
-def post(url, body, content_type="application/json", token=TOKEN, extra=None):
-    headers = {"Content-Type": content_type, "Authorization": f"Bearer {token}", **(extra or {})}
-    request = urllib.request.Request(url, data=body, headers=headers, method="POST")
-    try:
-        with urllib.request.urlopen(request, timeout=5) as response:
-            return response.status, json.loads(response.read())
-    except urllib.error.HTTPError as error:
-        return error.code, json.loads(error.read())
-
-
-def test_api_answers_json_posts(server):
-    url, calls = server
-    assert post(f"{url}/ask", json.dumps({"text": "mutex", "mode": "define"}).encode()) == (200, {"answer": "echo mutex"})
-    assert calls == [("mutex", "define")]
-
-
-def test_api_rejects_browser_style_and_malformed_requests(server):
-    url, calls = server
-    assert post(f"{url}/ask", b'{"text": "x"}', content_type="text/plain")[0] == 404  # no CORS-free simple requests
-    assert post(f"{url}/other", b'{"text": "x"}')[0] == 404
-    assert post(f"{url}/ask", b"not json")[0] == 400
-    assert post(f"{url}/ask", b'{"mode": "define"}')[0] == 400
-    assert post(f"{url}/ask", b"x" * (api.MAX_BODY + 1))[0] == 413
-    assert calls == []
-
-
-def test_api_requires_the_token_and_refuses_browsers_and_rebound_hosts(server):
-    url, calls = server
-    body = b'{"text": "x"}'
-    assert post(f"{url}/ask", body, token="wrong")[0] == 401
-    assert post(f"{url}/ask", body, extra={"Origin": "https://evil.example"})[0] == 403
-    assert post(f"{url}/ask", body, extra={"Host": "evil.example"})[0] == 403  # DNS rebinding
-    assert calls == []
-
-
-def test_api_token_is_created_once_and_reused(tmp_path):
-    path = tmp_path / "api_token"
-    token = api.load_token(path)
-    assert len(token) >= 32 and api.load_token(path) == token
 
 
 # --- OCR ---------------------------------------------------------------------------------------------------

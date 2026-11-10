@@ -56,7 +56,6 @@ DEFAULTS = {  # written to SETTINGS_FILE on first run; edit that file to change 
     "copy_fallback": True,
     "ctrl_c_fallback": False,
     "glossary": True,
-    "api_port": 0,
 }
 
 
@@ -68,32 +67,18 @@ def save(settings: dict) -> None:
     os.replace(temporary, SETTINGS_FILE)
 
 
-def migrate(raw: dict) -> dict:
-    """Upgrade a v0.3 settings file: "prompts" -> "modes" (adding the new built-in modes), "hotkey" -> "hotkeys"."""
-    migrated = dict(raw)
-    if "prompts" in migrated and "modes" not in migrated:
-        old = {name: {"prompt": prompt, "search": name == "define"} for name, prompt in migrated.pop("prompts").items()}
-        migrated["modes"] = {**DEFAULTS["modes"], **old}
-    if "hotkey" in migrated and "hotkeys" not in migrated:
-        migrated["hotkeys"] = {**DEFAULTS["hotkeys"], "lookup": migrated.pop("hotkey")}
-    return migrated
-
-
 def load() -> dict:
     """The defaults, overridden by whatever the user put in settings.json (created on first run)."""
     if not SETTINGS_FILE.exists():
         save(DEFAULTS)
     raw = json.loads(SETTINGS_FILE.read_text("utf-8"))
-    migrated = migrate(raw)
-    if migrated != raw:
-        save(migrated)
-    return {**DEFAULTS, **migrated, "hotkeys": {**DEFAULTS["hotkeys"], **migrated.get("hotkeys", {})}}
+    return {**DEFAULTS, **raw, "hotkeys": {**DEFAULTS["hotkeys"], **raw.get("hotkeys", {})}}
 
 
 def update(**changes: object) -> None:
     """Change top-level keys in settings.json, keeping everything else the user wrote."""
     raw = json.loads(SETTINGS_FILE.read_text("utf-8")) if SETTINGS_FILE.exists() else dict(DEFAULTS)
-    save({**migrate(raw), **changes})
+    save({**raw, **changes})
 
 
 def safe_load() -> tuple[dict, str]:

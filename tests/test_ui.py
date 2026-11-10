@@ -29,7 +29,8 @@ def test_work_area_is_a_rectangle():
 
 def make_popup(root, events):
     return Popup(root, on_follow_up=lambda q: events.append(("follow", q)),
-                 on_replace=lambda t: events.append(("replace", t)), on_hide=lambda: events.append(("hide",)))
+                 on_replace=lambda t: events.append(("replace", t)), on_hide=lambda: events.append(("hide",)),
+                 on_cycle=lambda: events.append(("cycle",)))
 
 
 def text_of(popup):
@@ -72,7 +73,9 @@ def test_popup_buttons_copy_replace_pin_and_follow_up(root):
 
     popup.toggle_pin()
     assert popup.pinned and popup.pin_button["text"] == "Unpin" and popup._timer is None
+    assert not root.overrideredirect() and not root.attributes("-topmost")  # a normal window: Snap works
     popup.toggle_pin()
+    assert root.overrideredirect() and root.attributes("-topmost")
 
     popup.entry.insert(0, "  what about threads? ")
     popup._follow_up(None)
@@ -101,3 +104,38 @@ def test_popup_notice_and_empty_answer(root):
     popup.show("t", request=9)
     popup.finish(9, "", "local", "")
     assert text_of(popup) == "(empty answer)"
+
+
+def test_popup_shift_tab_cycles_and_the_close_button_hides(root):
+    events = []
+    popup = make_popup(root, events)
+    popup.show("term", request=1, status="define · Shift+Tab: next mode")
+    assert popup.status["text"] == "define · Shift+Tab: next mode"
+    root.event_generate("<Shift-Tab>")
+    root.update()
+    assert ("cycle",) in events
+    assert root.protocol("WM_DELETE_WINDOW")  # the X button is bound (to hide), not left to destroy the root
+
+
+def test_a_moved_card_stays_put_while_streaming(root):
+    popup = make_popup(root, [])
+    popup.show("term", request=1)
+    popup.moved = True
+    root.geometry("+40+40")
+    root.update()
+    popup.append(1, "more text " * 30)
+    root.update()
+    assert (root.winfo_x(), root.winfo_y()) == (40, 40)
+    popup.show("next", request=2)
+    assert not popup.moved  # a new lookup appears at the cursor again
+
+
+def test_mic_starts_windows_voice_typing_in_the_box(root, monkeypatch):
+    started = []
+    monkeypatch.setattr(ui, "start_dictation", lambda: started.append(True))
+    popup = make_popup(root, [])
+    popup.show("term", request=1)
+    popup.dictate()
+    assert started and popup.holding_open
+    popup._hide_if_unfocused()
+    assert root.state() == "normal"  # focus going to the voice typing panel doesn't hide the card
