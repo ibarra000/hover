@@ -1,8 +1,10 @@
+import io
 import tkinter as tk
 from types import SimpleNamespace
 
 import pytest
 from ddgs.exceptions import DDGSException
+from PIL import Image
 
 import hover
 
@@ -11,6 +13,8 @@ RESULTS = [
     {"title": "os.path — pathname functions", "href": DOCS_URL, "body": "os.path.join(path, *paths) joins path segments."},
     {"title": "Tutorial", "href": "https://example.com/join", "body": "How to join paths."},
 ]
+ANSWER = "os.path.join: Python function\nJoins paths."
+PNG = b"\x89PNG fake screenshot"
 
 
 def fake_search(results=(), error=None):
@@ -29,9 +33,10 @@ def chat_calls(monkeypatch):
 
     def fake_chat(**kwargs):
         calls.append(kwargs)
-        return SimpleNamespace(message=SimpleNamespace(content="  os.path.join: Python function\nJoins paths.  "))
+        return SimpleNamespace(message=SimpleNamespace(content=f"  {ANSWER}  "))
 
     monkeypatch.setattr(hover.ollama, "chat", fake_chat)
+    monkeypatch.setattr(hover, "DDGS", fake_search(RESULTS))
     return calls
 
 
@@ -48,50 +53,91 @@ def test_clean_collapses_whitespace_and_caps_length():
     assert len(hover.clean("x" * 1000)) == hover.MAX_TERM_CHARS
 
 
-def test_explain_grounds_the_prompt_in_search_results(monkeypatch, chat_calls):
-    monkeypatch.setattr(hover, "DDGS", fake_search(RESULTS))
+def test_text_is_grounded_in_search_and_remembered_without_snippets(chat_calls):
+    session = hover.Session()
 
-    answer, link = hover.explain("os.path.join")
+    assert session.ask("os.path.join") == (ANSWER, DOCS_URL)
 
-    assert (answer, link) == ("os.path.join: Python function\nJoins paths.", DOCS_URL)
     call = chat_calls[0]
     assert (call["model"], call["think"], call["keep_alive"]) == (hover.MODEL, False, -1)
     assert call["messages"][0]["content"] == hover.SYSTEM_PROMPT
-    assert "joins path segments" in call["messages"][1]["content"]
+    assert "joins path segments" in call["messages"][-1]["content"]
+    assert session.history == [
+        {"role": "user", "content": "Copied: os.path.join"},
+        {"role": "assistant", "content": ANSWER},
+    ]
+    assert session.turns == 1
 
 
-def test_explain_falls_back_to_model_only_when_search_fails(monkeypatch, chat_calls):
+def test_follow_ups_carry_the_conversation(chat_calls):
+    session = hover.Session()
+    session.ask("os.path.join")
+    session.ask("what does it return?")
+
+    assert chat_calls[1]["messages"][1:3] == session.history[:2]
+    assert session.turns == 2
+
+
+def test_screenshots_go_to_the_vision_model_without_search(monkeypatch, chat_calls):
+    monkeypatch.setattr(hover, "DDGS", fake_search(error=AssertionError("searched")))
+    session = hover.Session()
+
+    assert session.ask(PNG) == (ANSWER, "")
+
+    call = chat_calls[0]
+    assert call["model"] == hover.VISION_MODEL
+    assert call["messages"][-1]["images"] == [PNG]
+    assert session.history[0] == {"role": "user", "content": "[screenshot]"}
+
+
+def test_repeating_an_item_reuses_the_answer(chat_calls):
+    session = hover.Session()
+    session.ask("os.path.join")
+
+    assert session.ask("os.path.join") == (ANSWER, DOCS_URL)
+    assert len(chat_calls) == 1
+
+
+def test_clear_and_trim_bound_the_history(chat_calls):
+    session = hover.Session()
+    for n in range(hover.MAX_MESSAGES):
+        session.ask(f"term {n}")
+    assert len(session.history) == hover.MAX_MESSAGES
+
+    session.clear()
+    assert (session.history, session.turns) == ([], 0)
+
+
+def test_search_failure_falls_back_to_model_only(monkeypatch, chat_calls):
     monkeypatch.setattr(hover, "DDGS", fake_search(error=DDGSException("No results found.")))
 
-    _, link = hover.explain("sonder")
-
-    assert link == ""
-    assert "(no search results)" in chat_calls[0]["messages"][1]["content"]
+    assert hover.Session().ask("sonder")[1] == ""
+    assert "(no search results)" in chat_calls[0]["messages"][-1]["content"]
 
 
-def test_explain_only_links_to_web_pages(monkeypatch, chat_calls):
+def test_only_links_to_web_pages(monkeypatch, chat_calls):
     unsafe = {"title": "x", "href": "javascript:alert(1)", "body": "x"}
     quoted = {"title": "x", "href": 'https://a.example/x"\tfile:///C:/Windows/win.ini', "body": "x"}
     monkeypatch.setattr(hover, "DDGS", fake_search([unsafe, quoted, *RESULTS]))
-    assert hover.explain("os.path.join")[1] == DOCS_URL
+    assert hover.Session().ask("os.path.join")[1] == DOCS_URL
 
     monkeypatch.setattr(hover, "DDGS", fake_search([unsafe]))
-    assert hover.explain("os.path.join")[1] == ""
+    assert hover.Session().ask("os.path.join")[1] == ""
 
 
-def test_lookup_turns_failures_into_a_readable_message(monkeypatch):
-    def offline(term):
-        raise ConnectionError("Failed to connect to Ollama.")
+def test_lookup_turns_failures_into_a_readable_message():
+    class Offline:
+        def ask(self, item):
+            raise ConnectionError("Failed to connect to Ollama.")
 
-    monkeypatch.setattr(hover, "explain", offline)
-    assert hover.lookup("hubris") == ("Error: Failed to connect to Ollama.", "")
+    assert hover.lookup(Offline(), "hubris") == ("Error: Failed to connect to Ollama.", "")
 
 
-def test_warm_up_pins_the_model_and_reports_failures(monkeypatch):
+def test_warm_up_pins_both_models_and_reports_failures(monkeypatch):
     calls = []
     monkeypatch.setattr(hover.ollama, "generate", lambda **kwargs: calls.append(kwargs))
     assert hover.warm_up() == ""
-    assert (calls[0]["model"], calls[0]["keep_alive"]) == (hover.MODEL, -1)
+    assert [(c["model"], c["keep_alive"]) for c in calls] == [(hover.MODEL, -1), (hover.VISION_MODEL, -1)]
 
     def missing(**kwargs):
         raise hover.ollama.ResponseError("model not found", 404)
@@ -100,13 +146,19 @@ def test_warm_up_pins_the_model_and_reports_failures(monkeypatch):
     assert hover.warm_up().startswith("Model not ready: model not found")
 
 
-def test_clipboard_term_reads_and_cleans_text_or_returns_empty():
-    assert hover.clipboard_term(SimpleNamespace(clipboard_get=lambda: "  std::unique_ptr \n")) == "std::unique_ptr"
+def test_clipboard_item_prefers_screenshots_then_text(monkeypatch):
+    text_root = SimpleNamespace(clipboard_get=lambda: "  std::unique_ptr \n")
+    monkeypatch.setattr(hover.ImageGrab, "grabclipboard", lambda: Image.new("RGB", (4000, 100)))
+    png = hover.clipboard_item(text_root)
+    assert Image.open(io.BytesIO(png)).width == hover.MAX_IMAGE_PX
+
+    monkeypatch.setattr(hover.ImageGrab, "grabclipboard", lambda: None)
+    assert hover.clipboard_item(text_root) == "std::unique_ptr"
 
     def no_text():
         raise tk.TclError("CLIPBOARD selection doesn't exist")
 
-    assert hover.clipboard_term(SimpleNamespace(clipboard_get=no_text)) == ""
+    assert hover.clipboard_item(SimpleNamespace(clipboard_get=no_text)) == ""
 
 
 def test_popup_shows_fills_and_hides(root):
@@ -117,15 +169,15 @@ def test_popup_shows_fills_and_hides(root):
     assert root.state() == "normal"
     assert (popup.title["text"], popup.body["text"]) == ("ephemeral", hover.LOADING)
 
-    popup.fill("stale term", "old answer", DOCS_URL)
+    popup.fill("stale term", "old answer", DOCS_URL, 1)
     assert popup.body["text"] == hover.LOADING
 
-    popup.fill("ephemeral", "adjective: lasting a very short time", "https://www.merriam-webster.com/x")
+    popup.fill("ephemeral", "adjective: lasting a very short time", "https://www.merriam-webster.com/x", 1)
     assert popup.body["text"] == "adjective: lasting a very short time"
-    assert "merriam-webster.com" in popup.link["text"]
+    assert popup.link["text"] == "www.merriam-webster.com ↗"
 
-    popup.fill("ephemeral", "answer", "")
-    assert popup.link["text"] == hover.NO_WEB_NOTE
+    popup.fill("ephemeral", "answer", "", 3)
+    assert popup.link["text"] == f"{hover.NO_WEB_NOTE} · 3 in context"
 
     popup.hide()
     assert root.state() == "withdrawn"
