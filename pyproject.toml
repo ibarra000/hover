@@ -1,14 +1,24 @@
 [project]
 name = "hover"
-version = "0.3.0"
-description = "Hotkey dictionary and documentation lookup for Windows, powered by a local model."
+version = "1.0.0"
+description = "Select, hover over, copy, or snip anything on Windows and get a short grounded answer from a local model."
 requires-python = ">=3.13"
 dependencies = [
     "ddgs>=9.16.1",
     "ollama>=0.6.3",
+    "openai>=3.48.0",
     "pillow>=13.0.0",
     "pynput>=1.8.2",
     "pystray>=0.19.5",
+    "pywin32>=312",
+    "uiautomation>=2.0.29",
+    "winrt-runtime>=4.1.0",
+    "winrt-windows-foundation>=4!10.0.28000.2957",
+    "winrt-windows-foundation-collections>=4!10.0.28000.2957",
+    "winrt-windows-globalization>=4!10.0.28000.2957",
+    "winrt-windows-graphics-imaging>=4!10.0.28000.2957",
+    "winrt-windows-media-ocr>=4!10.0.28000.2957",
+    "winrt-windows-storage-streams>=4!10.0.28000.2957",
 ]
 
 [dependency-groups]
@@ -20,11 +30,11 @@ dev = [
 
 [tool.cxfreeze]
 executables = [
-    { script = "hover.pyw", base = "gui", icon = "hover", target_name = "Hover", shortcut_name = "Hover", shortcut_dir = "DesktopFolder" },
+    { script = "launch.pyw", base = "gui", icon = "hover", target_name = "Hover", shortcut_name = "Hover", shortcut_dir = "DesktopFolder" },
 ]
 
 [tool.cxfreeze.build_exe]
-packages = ["pystray", "pynput", "ddgs"]  # backends/engines are picked via dynamic imports
+packages = ["hover", "pystray", "pynput", "ddgs", "uiautomation", "comtypes", "winrt", "win32com", "openai"]  # dynamic imports
 
 [tool.cxfreeze.bdist_msi]
 upgrade-code = "{3D78F94B-9441-4277-BFA8-EFFA6CC7E6DC}"  # fixed, so new versions upgrade in place
@@ -32,3 +42,8 @@ initial-target-dir = "[LocalAppDataFolder]Programs\\Hover"
 install-icon = "hover.ico"
 launch-on-finish = true
 summary-data = { author = "Edward Ibarra" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
